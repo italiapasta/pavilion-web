@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// ===== 발표자 정보: 여기만 바꾸면 됩니다 =====
-const AUTHOR = '이름 · 학번';
+
+const AUTHOR = '손병재 · C535185';
 // ===========================================
 
 document.getElementById('author').textContent = AUTHOR;
