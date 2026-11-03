@@ -363,7 +363,13 @@ const jCam = new THREE.PerspectiveCamera(32, 2, 0.01, 20);
 let jointRoot = null;
 load('models/joint.glb').then((g) => {
   jointRoot = new THREE.Group();
-  g.scene.traverse((o) => { if (o.isMesh) { o.material.side = THREE.DoubleSide; if (o.name.startsWith('J1')) { o.material.metalness = 0.6; o.material.roughness = 0.35; } } });
+  g.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.material.side = THREE.DoubleSide;
+    const steel = o.name.startsWith('J1');
+    o.material.metalness = steel ? 0.3 : 0.0;   // 환경맵이 없어서 금속값이 높으면 검게 보임
+    o.material.roughness = steel ? 0.5 : 0.8;
+  });
   jointRoot.add(g.scene);
   jScene.add(jointRoot);
 });
