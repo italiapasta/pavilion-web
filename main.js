@@ -80,7 +80,18 @@ resize();
 
 // ---------- 불러오기 ----------
 const loader = new GLTFLoader();
-const load = (url) => new Promise((res, rej) => loader.load(url, res, undefined, rej));
+// 모델 파일은 models/ 폴더 안이나 맨 위 어느 쪽에 있어도 찾는다
+const CANDIDATES = (f) => ['models/' + f, f];
+const load = async (f) => {
+  for (const p of CANDIDATES(f)) { try { return await loader.loadAsync(p); } catch (e) {} }
+  throw new Error(f + ' 파일을 찾지 못했어요');
+};
+const getRes = async (f) => {
+  for (const p of CANDIDATES(f)) { try { const r = await fetch(p); if (r.ok) return r; } catch (e) {} }
+  throw new Error(f + ' 파일을 찾지 못했어요');
+};
+const getJSON = async (f) => (await getRes(f)).json();
+const getText = async (f) => (await getRes(f)).text();
 
 const models = {};        // after, before, data
 const groups = { after: {}, before: {} };   // type -> [{obj, bay}]
@@ -105,13 +116,13 @@ function prepModel(root, key) {
 }
 
 Promise.all([
-  load('models/pavilion_after.glb'),
-  load('models/pavilion_before.glb'),
-  load('models/data_shade.glb'),
-  fetch('models/process.json').then((r) => r.json()),
-  fetch('models/counts_after.json').then((r) => r.json()),
-  fetch('models/counts_before.json').then((r) => r.json()),
-  fetch('models/report_after.txt').then((r) => r.text()),
+  load('pavilion_after.glb'),
+  load('pavilion_before.glb'),
+  load('data_shade.glb'),
+  getJSON('process.json'),
+  getJSON('counts_after.json'),
+  getJSON('counts_before.json'),
+  getText('report_after.txt'),
 ]).then(([a, b, d, proc, ca, cb, rep]) => {
   models.after = a.scene; models.before = b.scene; models.data = d.scene;
   prepModel(models.after, 'after');
@@ -361,7 +372,7 @@ const jl2 = new THREE.DirectionalLight('#ffffff', 2.4); jl2.position.set(-1.5, -
 jScene.add(new THREE.AmbientLight('#ffffff', 0.8));
 const jCam = new THREE.PerspectiveCamera(32, 2, 0.01, 20);
 let jointRoot = null;
-load('models/joint.glb').then((g) => {
+load('joint.glb').then((g) => {
   jointRoot = new THREE.Group();
   g.scene.traverse((o) => {
     if (!o.isMesh) return;
