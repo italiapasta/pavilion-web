@@ -98,7 +98,28 @@ code { background: #ece7df; padding: 1px 5px; border-radius: 4px; font-size: 11.
 .tip.g { background: var(--green); color: #fff; font-weight: 700; }
 #loading { position: fixed; right: 24px; top: 20px; font-size: 13px; color: var(--mut); }
 
+.walkbtn { margin-left: auto; }
+#walkhud { display: none; position: fixed; left: 16px; right: 16px; bottom: 16px; }
+body.walking #panel, body.walking #nav, body.walking .tip { display: none !important; }
+body.walking #walkhud { display: block; }
+body.walking #view { cursor: grab; }
+.wh-top { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; }
+.wh-where { background: rgba(255,255,255,0.94); border-radius: 14px; padding: 10px 16px; box-shadow: 0 6px 30px rgba(0,0,0,0.08); }
+.wh-where b { display: block; font-size: 17px; }
+.wh-where span { font-size: 12.5px; color: var(--mut); }
+.wh-bar { background: rgba(255,255,255,0.94); border-radius: 99px; display: flex; align-items: center; gap: 18px; padding: 9px 18px 9px 10px; box-shadow: 0 6px 30px rgba(0,0,0,0.08); }
+.wh-slider { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--mut); white-space: nowrap; }
+.wh-slider input { flex: 1; accent-color: var(--ink); min-width: 60px; }
+.wh-slider span { font-variant-numeric: tabular-nums; min-width: 42px; color: var(--ink); }
+.wh-hint { margin: 8px 4px 0; font-size: 11.5px; color: #5b544b; text-shadow: 0 1px 2px rgba(255,255,255,0.8); }
+#whwhere::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; background: var(--c, #ccc); vertical-align: 0; }
+
 @media (max-width: 760px) {
+  #walkhud { left: 8px; right: 8px; bottom: 8px; }
+  .wh-bar { flex-wrap: wrap; border-radius: 18px; gap: 8px 12px; }
+  .wh-hint { display: none; }
+  .walkbtn { padding: 8px 10px; font-size: 12px; }
+  #stepname { font-size: 13px; }
   #panel { top: auto; bottom: 84px; left: 8px; right: 8px; width: auto; max-height: 48vh; }
   #nav { left: 8px; right: 8px; bottom: 8px; }
   h1 { font-size: 28px; }

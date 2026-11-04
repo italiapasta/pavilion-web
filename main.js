@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-
+// ===== 발표자 정보: 여기만 바꾸면 됩니다 =====
 const AUTHOR = '손병재 · C535185';
 // ===========================================
 
@@ -67,12 +67,16 @@ const grid = new THREE.GridHelper(120, 120, '#cfc9be', '#e2ddd4');
 grid.position.y = 0.002;
 scene.add(grid);
 
+const walk = { on: false, path: null, len: 0, s: 0, auto: true, speed: 1.1, yaw: 0, pitch: -0.04,
+  drag: null, keys: {}, bob: 0, hudT: 0, panels: [], all: [] };
+
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   // 왼쪽 패널(넓은 화면) 또는 아래 패널(좁은 화면)을 피해 모델을 보이는 쪽 가운데로
-  if (w > 760) camera.setViewOffset(w, h, -210, 0, w, h); else camera.setViewOffset(w, h, 0, h * 0.24, w, h);
+  if (walk.on) camera.clearViewOffset();
+  else if (w > 760) camera.setViewOffset(w, h, -210, 0, w, h); else camera.setViewOffset(w, h, 0, h * 0.24, w, h);
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
@@ -391,7 +395,7 @@ const dots = document.getElementById('dots');
 STEP_NAMES.forEach((_, i) => { const d = document.createElement('i'); d.onclick = () => go(i + 1); dots.appendChild(d); });
 document.getElementById('prev').onclick = () => go(Math.max(1, step - 1));
 document.getElementById('next').onclick = () => go(Math.min(5, step + 1));
-addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') go(Math.min(5, step + 1)); if (e.key === 'ArrowLeft') go(Math.max(1, step - 1)); });
+addEventListener('keydown', (e) => { if (walk.on) return; if (e.key === 'ArrowRight') go(Math.min(5, step + 1)); if (e.key === 'ArrowLeft') go(Math.max(1, step - 1)); });
 
 // 단계별 카메라 시점 (three 좌표: +z = 남쪽)
 const VIEWS = {
@@ -452,7 +456,7 @@ renderer.setAnimationLoop(() => {
     controls.target.lerpVectors(camAnim.t0, camAnim.t1, e);
     if (camAnim.t >= 1) camAnim = null;
   }
-  controls.update();
+  if (walk.on) walkFrame(dt); else controls.update();
   renderer.render(scene, camera);
   updateTips();
   if (step === 5 && jointRoot) {
@@ -468,3 +472,139 @@ renderer.setAnimationLoop(() => {
     }
   }
 });
+
+// ---------- 걷기: 사람 눈높이로 주 동선을 따라 ----------
+const EYE = 1.6;
+const SUN_HOME = sun.position.clone();
+const $ = (id) => document.getElementById(id);
+const ray = new THREE.Raycaster();
+const UP = new THREE.Vector3(0, 1, 0);
+const PLACE = {
+  P1: ['막힌 패널 아래', '해가 가장 강한 자리 — 깊은 그늘', '#debe8c'],
+  P2: ['루버 패널 아래', '날개 사이로 걸러진 빛', '#be8750'],
+  P3: ['격자 패널 아래', '바닥에 떨어지는 빛 무늬', '#e8d0a5'],
+};
+
+function buildWalkPath() {
+  const r = process.route.map(R2T).map((v) => v.setY(0));
+  const a = r[0], b = r[r.length - 1];
+  const da = a.clone().sub(r[1]).normalize(), db = b.clone().sub(r[r.length - 2]).normalize();
+  // 멀리서 닫힌 벽을 보며 다가가고, 반대편으로 빠져나간다
+  const pts = [a.clone().addScaledVector(da, 9), a.clone().addScaledVector(da, 4), ...r,
+               b.clone().addScaledVector(db, 4), b.clone().addScaledVector(db, 9)];
+  walk.path = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  walk.len = walk.path.getLength();
+  walk.inA = 9 / walk.len; walk.inB = 1 - 9 / walk.len;
+  Object.entries(groups.after).forEach(([t, list]) => list.forEach((o) => {
+    walk.all.push(o); if (t.startsWith('P')) walk.panels.push(o);
+  }));
+}
+
+function sunAt(hour, doy = 213) {   // 런던, 8월 1일 (분석 기간 6~9월 가운데)
+  const phi = THREE.MathUtils.degToRad(51.5);
+  const dec = THREE.MathUtils.degToRad(23.45 * Math.sin(THREE.MathUtils.degToRad(360 / 365 * (284 + doy))));
+  const ha = THREE.MathUtils.degToRad(15 * (hour - 12));
+  const su = Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(ha);
+  const se = -Math.cos(dec) * Math.sin(ha);
+  const sn = Math.cos(phi) * Math.sin(dec) - Math.sin(phi) * Math.cos(dec) * Math.cos(ha);
+  return R2T([se, sn, Math.max(su, 0.03)]).normalize();
+}
+function setSun(hour) {
+  sun.position.copy(sunAt(hour)).multiplyScalar(30);
+  const h = Math.floor(hour), m = Math.round((hour - h) * 60);
+  $('wsunt').textContent = `${h}:${String(m).padStart(2, '0')}`;
+}
+
+function enterWalk() {
+  if (!models.after) return;
+  if (!walk.path) buildWalkPath();
+  walk.on = true; document.body.classList.add('walking');
+  clearTips(); resetAfter(); applyExplode(0); explodeInput.value = 0;
+  chainGroup.visible = false; play.on = false;
+  showOnly('after'); overlay.visible = false; dataLines.visible = false;
+  controls.enabled = false; controls.autoRotate = false; camAnim = null;
+  walk.s = 0; walk.auto = true; walk.yaw = 0; walk.pitch = -0.04;
+  camera.fov = 64; camera.near = 0.05;
+  setSun(+$('wsun').value);
+  resize(); syncWalkUI();
+}
+function exitWalk() {
+  walk.on = false; document.body.classList.remove('walking');
+  controls.enabled = true; camera.fov = 38; camera.near = 0.1;
+  sun.position.copy(SUN_HOME);
+  resize();
+  go(step);
+}
+function syncWalkUI() { $('wplay').textContent = walk.auto ? '❚❚' : '▶'; }
+
+$('walkbtn').onclick = (e) => { e.currentTarget.blur(); enterWalk(); };
+$('walkbtn2').onclick = (e) => { e.currentTarget.blur(); enterWalk(); };
+$('wexit').onclick = exitWalk;
+$('wplay').onclick = (e) => { e.currentTarget.blur(); if (walk.s >= walk.len - 0.01) walk.s = 0; walk.auto = !walk.auto; syncWalkUI(); };
+$('wprog').onchange = (e) => e.target.blur();
+$('wprog').oninput = (e) => { walk.s = +e.target.value * walk.len; walk.auto = false; syncWalkUI(); };
+$('wsun').oninput = (e) => setSun(+e.target.value);
+$('wsun').onchange = (e) => e.target.blur();
+
+const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
+addEventListener('keydown', (e) => {
+  if (!walk.on) return;
+  if (KEYMAP[e.code]) { walk.keys[KEYMAP[e.code]] = true; e.preventDefault(); }
+  if (e.code === 'Space') { $('wplay').click(); e.preventDefault(); }
+  if (e.code === 'Escape') exitWalk();
+});
+addEventListener('keyup', (e) => { if (KEYMAP[e.code]) walk.keys[KEYMAP[e.code]] = false; });
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!walk.on) return;
+  walk.drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing';
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!walk.on || !walk.drag) return;
+  walk.yaw -= (e.clientX - walk.drag.x) * 0.0045;
+  walk.pitch = THREE.MathUtils.clamp(walk.pitch - (e.clientY - walk.drag.y) * 0.0035, -1.1, 1.2);
+  walk.drag = { x: e.clientX, y: e.clientY };
+});
+const endDrag = () => { walk.drag = null; canvas.style.cursor = ''; };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('dblclick', () => { if (walk.on) { walk.yaw = 0; walk.pitch = -0.04; } });
+
+const _dir = new THREE.Vector3();
+function walkFrame(dt) {
+  const k = walk.keys;
+  const fw = (k.f ? 1 : 0) - (k.b ? 1 : 0);
+  let moving = false;
+  if (fw) { walk.s += fw * walk.speed * 1.7 * dt; moving = true; }
+  else if (walk.auto) { walk.s += walk.speed * dt; moving = true; }
+  walk.yaw += ((k.l ? 1 : 0) - (k.r ? 1 : 0)) * 1.6 * dt;
+  if (walk.s >= walk.len) { walk.s = walk.len; if (walk.auto) { walk.auto = false; syncWalkUI(); } moving = false; }
+  if (walk.s < 0) walk.s = 0;
+  if (moving) walk.bob += dt * 7.5;
+
+  const u = walk.s / walk.len;
+  const p = walk.path.getPointAt(u), t = walk.path.getTangentAt(u);
+  camera.position.set(p.x, EYE + Math.sin(walk.bob) * 0.022, p.z);
+  const h = Math.atan2(t.x, t.z) + walk.yaw;
+  _dir.set(Math.sin(h) * Math.cos(walk.pitch), Math.sin(walk.pitch), Math.cos(h) * Math.cos(walk.pitch));
+  camera.lookAt(camera.position.clone().add(_dir));
+
+  walk.hudT -= dt;
+  if (walk.hudT <= 0) {
+    walk.hudT = 0.12;
+    $('wprog').value = u.toFixed(3);
+    $('wdist').textContent = walk.s.toFixed(1) + ' m';
+    ray.set(camera.position, UP);
+    const hitP = ray.intersectObjects(walk.panels, false)[0];
+    const hitAny = ray.intersectObjects(walk.all, false)[0];
+    let place;
+    if (hitP) place = PLACE[hitP.object.userData.type.slice(0, 2)];
+    else if (hitAny) place = ['열린 칸', '패널 없이 하늘이 보이는 자리 — 옆길과 만나는 문 근처', '#9fc6e8'];
+    else if (u < walk.inA) place = ['다가가는 중', '멀리서는 닫힌 벽 하나', '#c8c2b8'];
+    else if (u > walk.inB) place = ['빠져나온 뒤', '뒤돌아보면 다시 닫힌 벽', '#c8c2b8'];
+    else place = ['입구', '벽이 아래에서 벌어져 길이 되는 자리', '#c8c2b8'];
+    $('whwhere').textContent = place[0];
+    $('whwhere').style.setProperty('--c', place[2]);
+    $('whnote').textContent = place[1];
+  }
+}

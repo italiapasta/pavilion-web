@@ -38,6 +38,8 @@
       <p class="lead">벽 하나가 위에서는 닫히고 아래에서는 벌어져 길이 되고, 해가 강한 곳은 닫혀 그 길에 그늘을 만든다.</p>
       <p class="byline"><span id="author">이름 · 학번</span> · Serpentine Pavilion 변형 · 런던 켄싱턴 가든스</p>
 
+      <button id="walkbtn2" class="btn dark" style="margin:12px 0 0">🚶 사람 눈높이로 안에서 걸어 보기</button>
+
       <h3>무엇을 느끼게 할지</h3>
       <ul>
         <li>멀리서는 <b>닫힌 벽</b>, 다가가면 <b>내가 걷는 길만큼 열리는</b> 공간</li>
@@ -138,7 +140,22 @@
     <div id="dots"></div>
     <button id="next" class="round dark">›</button>
     <span id="stepname"></span>
+    <button id="walkbtn" class="btn dark walkbtn">🚶 안에서 걷기</button>
   </nav>
+
+  <!-- 걷기 모드 -->
+  <div id="walkhud">
+    <div class="wh-top">
+      <div class="wh-where"><b id="whwhere">터널 밖</b><span id="whnote">멀리서는 닫힌 벽</span></div>
+      <button id="wexit" class="btn">✕ 나가기</button>
+    </div>
+    <div class="wh-bar">
+      <button id="wplay" class="round dark">❚❚</button>
+      <label class="wh-slider">걸은 거리 <input id="wprog" type="range" min="0" max="1" step="0.001" value="0" /><span id="wdist">0 m</span></label>
+      <label class="wh-slider">해 시각 <input id="wsun" type="range" min="6" max="20" step="0.1" value="14" /><span id="wsunt">14:00</span></label>
+    </div>
+    <p class="wh-hint">드래그: 둘러보기 · W/S 또는 ↑↓: 앞뒤로 걷기 · A/D 또는 ←→: 고개 돌리기 · 스페이스: 멈춤 · 더블클릭: 정면</p>
+  </div>
 
   <div id="loading">모델을 불러오는 중…</div>
   <script type="module" src="main.js"></script>
