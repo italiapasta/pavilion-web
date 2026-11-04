@@ -537,7 +537,7 @@ function buildSite() {
   }
   const sg = new THREE.BufferGeometry();
   sg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); sg.setIndex(idx); sg.computeVertexNormals();
-  const floor = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ color: '#1b1a19', roughness: 0.95, side: THREE.DoubleSide }));
+  const floor = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ color: '#2f2c29', roughness: 0.9, side: THREE.DoubleSide }));
   floor.receiveShadow = true; site.add(floor);
 
   // 공원 나무 (단순한 형태, 동선과 교차 동선은 피해서)
@@ -785,7 +785,7 @@ function walkFrame(dt) {
 const flaps = [];
 let flapData = null, flapMode = 'closed', sunHour = 14, dayPlay = false, aimed = null;
 const demo = { t: 0 };
-const FLAP_MAX = THREE.MathUtils.degToRad(55);
+const FLAP_MAX = THREE.MathUtils.degToRad(75);
 const AIM_COLOR = new THREE.Color('#6a4a1a'), NO_EMIT = new THREE.Color('#000000');
 function buildFlaps() {
   if (!flapData) return;
@@ -800,11 +800,18 @@ function buildFlaps() {
     const n = new THREE.Vector3(...f.n).normalize();
     const c = new THREE.Vector3(...f.c).sub(pivot.position);
     const sign = c.clone().applyAxisAngle(axis, 0.2).sub(c).dot(n) > 0 ? 1 : -1;   // 아래 끝이 바깥으로 나가는 쪽
-    const flap = { pivot, axis, sign, n, mesh: o, angle: 0, open: false };
+    const flap = { pivot, axis, sign, n, mesh: o, angle: 0, open: false, c0: new THREE.Vector3(...f.c) };
     o.userData.flap = flap;
     flaps.push(flap);
   });
+  // 열린 칸으로 들어오는 하늘빛: 가까운 열린 패널 6장에 빛을 붙인다 (빛 개수는 고정해야 셰이더가 다시 안 만들어진다)
+  for (let i = 0; i < 6; i++) {
+    const L = new THREE.SpotLight('#fff1d6', 0, 14, 0.42, 0.65, 1.0);   // 열린 칸으로 비쳐 드는 햇빛 기둥
+    scene.add(L, L.target); skyLights.push(L);
+  }
 }
+const skyLights = [];
+const _lp = new THREE.Vector3(), _sd2 = new THREE.Vector3();
 function updateFlaps(dt) {
   if (!flaps.length) return;
   let open = flaps.filter((f) => f.open).length;
@@ -825,6 +832,19 @@ function updateFlaps(dt) {
     if (f.open && flapMode !== 'closed') open++;
     f.mesh.material.emissive?.copy(f === aimed ? AIM_COLOR : NO_EMIT);
   }
+  // 하늘빛 배치 (걷기 모드에서만, 실내가 어두울 때 차이가 보인다)
+  const lit = walk.on ? flaps.filter((f) => f.angle > 0.05)
+    .sort((a, b) => a.c0.distanceToSquared(camera.position) - b.c0.distanceToSquared(camera.position)).slice(0, skyLights.length) : [];
+  skyLights.forEach((L, i) => {
+    const f = lit[i];
+    if (!f) { L.intensity = 0; return; }
+    // 해 쪽에서 열린 칸을 지나 바닥으로: 해가 낮거나 반대편이면 거의 위에서 비춘다
+    _sd2.copy(sunAt(sunHour)); if (_sd2.y < 0.35) _sd2.y = 0.35; _sd2.normalize();
+    L.position.copy(f.c0).addScaledVector(_sd2, 0.6);
+    L.target.position.copy(f.c0).addScaledVector(_sd2, -6);
+    L.target.updateMatrixWorld();
+    L.intensity = 60 * (f.angle / FLAP_MAX);
+  });
   if (flapMode === 'demo') {
     document.getElementById('dayinfo').textContent = `안에 있는 사람들이 여닫는 중 · ${flaps.length}장 중 ${open}장 열림 · 패널을 클릭해 직접 열어 보세요`;
   }
@@ -913,7 +933,7 @@ function renderFlapView(dt) {
   fState.t += dt;
   const k = +flapEx.value;
   fParts.forEach((p) => p.obj.position.copy(p.obj.userData.base).addScaledVector(p.dir, k));
-  const ang = THREE.MathUtils.degToRad(55) * (0.5 - 0.5 * Math.cos(fState.t * 0.9));   // 천천히 열고 닫기
+  const ang = THREE.MathUtils.degToRad(75) * (0.5 - 0.5 * Math.cos(fState.t * 0.9));   // 천천히 열고 닫기
   fPivot.rotation.x = -ang;
   fPivot.updateMatrixWorld(true);
   _A.copy(gasA0).addScaledVector(gasDir, k);
