@@ -17,7 +17,7 @@ const TYPES = {
   'F5_타이로드':   { label: '타이로드',   mat: '강봉 M24',              color: '#46484c', explode: -0.9 },
   'J1_노드철물':   { label: '노드 철물',  mat: '강판 14t + M16 볼트 4', color: '#46484c', explode: 0.7 },
   'J2_스크류앵커': { label: '스크류 앵커', mat: '강관 Ø76 L1.2m',       color: '#46484c', explode: -1.6 },
-  'P1_막힌패널':   { label: '막힌 패널',  mat: '합판 18t',              color: '#debe8c', explode: 3.0 },
+  'P1_막힌패널':   { label: '여닫이 패널', mat: '합판 18t + 위 경첩 + 가스 스프링', color: '#debe8c', explode: 3.0 },
   'P2_루버패널':   { label: '루버 패널',  mat: '목재 루버 6날',          color: '#be8750', explode: 3.4 },
   'P3_격자패널':   { label: '격자 패널',  mat: '목재 격자 30t',          color: '#e8d0a5', explode: 3.8 },
 };
@@ -128,7 +128,8 @@ Promise.all([
   getJSON('counts_after.json'),
   getJSON('counts_before.json'),
   getText('report_after.txt'),
-]).then(([a, b, d, proc, ca, cb, rep]) => {
+  getJSON('flaps.json').catch(() => null),
+]).then(([a, b, d, proc, ca, cb, rep, fl]) => {
   models.after = a.scene; models.before = b.scene; models.data = d.scene;
   prepModel(models.after, 'after');
   prepModel(models.before, 'before');
@@ -151,6 +152,7 @@ Promise.all([
   const m = rep.match(/그늘 일사 최대 (\d+)/); if (m) vmaxText = m[1];
   buildOverlays();
   buildCounts();
+  flapData = fl; buildFlaps();
   document.getElementById('loading').remove();
   go(1);
 }).catch((e) => {
@@ -425,6 +427,9 @@ function go(n) {
   chainGroup.visible = false; play.on = false; document.getElementById('play').textContent = '▶ 재생';
   overlay.visible = n <= 3; dataLines.visible = n === 2;
   controls.autoRotate = n === 1;
+  flapMode = n === 1 ? 'demo' : 'closed';
+  sun.position.copy(SUN_HOME);
+  document.getElementById('daybox').style.display = n === 1 && flaps.length ? '' : 'none';
   if (n === 1) {
     showOnly('after');
     entrancePts.forEach((p) => tip('입구', p));
@@ -458,6 +463,7 @@ renderer.setAnimationLoop(() => {
     if (camAnim.t >= 1) camAnim = null;
   }
   if (walk.on) walkFrame(dt); else controls.update();
+  updateFlaps(dt);
   renderer.render(scene, camera);
   updateTips();
   if (step === 5 && jointRoot) {
@@ -594,6 +600,7 @@ function sunAt(hour, doy = 213) {   // 런던, 8월 1일 (분석 기간 6~9월 �
   return R2T([se, sn, Math.max(su, 0.03)]).normalize();
 }
 function setSun(hour) {
+  sunHour = hour;
   sun.position.copy(sunAt(hour)).multiplyScalar(30);
   const h = Math.floor(hour), m = Math.round((hour - h) * 60);
   $('wsunt').textContent = `${h}:${String(m).padStart(2, '0')}`;
@@ -610,6 +617,8 @@ function enterWalk() {
   walk.s = 0; walk.auto = true; walk.free = false; walk.eye = EYE; walk.jy = 0; walk.vy = 0; walk.yaw = 0; walk.pitch = -0.04;
   camera.fov = 64; camera.near = 0.05;
   applyLook('walk');
+  flapMode = 'manual';
+  flaps.forEach((f) => { f.open = false; });
   setSun(+$('wsun').value);
   resize(); syncWalkUI();
 }
@@ -641,7 +650,8 @@ $('wplay').onclick = blurThen(() => {
 });
 $('wprog').oninput = (e) => { walk.free = false; walk.yaw = 0; walk.s = +e.target.value * walk.len; walk.auto = false; syncWalkUI(); };
 $('wprog').onchange = (e) => e.target.blur();
-$('wsun').oninput = (e) => setSun(+e.target.value);
+$('wsun').oninput = (e) => { dayPlay = false; $('wday').textContent = '하루 재생'; setSun(+e.target.value); };
+$('wday').onclick = blurThen(() => { dayPlay = !dayPlay; $('wday').textContent = dayPlay ? '❚❚ 멈춤' : '하루 재생'; });
 $('wsun').onchange = (e) => e.target.blur();
 
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'sl', KeyD: 'sr', ArrowLeft: 'l', ArrowRight: 'r', ShiftLeft: 'run', ShiftRight: 'run', KeyC: 'crouch' };
@@ -657,6 +667,7 @@ addEventListener('keydown', (e) => {
     }
   }
   if (e.code === 'KeyJ' && !e.repeat && walk.jy === 0) walk.vy = 3.3;   // 점프: 약 0.55m
+  if (e.code === 'KeyE' && !e.repeat && aimed) aimed.open = !aimed.open;
   if (e.code === 'Space') { $('wplay').click(); e.preventDefault(); }
   if (e.code === 'Escape') exitWalk();
 });
@@ -691,6 +702,10 @@ function blocked(from, dir, dist) {
 
 const _dir = new THREE.Vector3(), _mv = new THREE.Vector3(), _ax = new THREE.Vector3();
 function walkFrame(dt) {
+  if (dayPlay) {   // 하루 재생: 1초에 약 1시간
+    let h = sunHour + dt * 1.0; if (h > 20) h = 6;
+    $('wsun').value = h; setSun(h);
+  }
   const k = walk.keys;
   let moving = false, h;
   if (walk.free) {
@@ -735,6 +750,7 @@ function walkFrame(dt) {
   walk.hudT -= dt;
   if (walk.hudT <= 0) {
     walk.hudT = 0.12;
+    aimFlap();
     const n = walk.free ? nearestU(camera.position) : { u: walk.s / walk.len, d: 0 };
     if (!walk.free) { $('wprog').value = n.u.toFixed(3); $('wdist').textContent = walk.s.toFixed(1) + ' m'; }
     else $('wdist').textContent = '자유';
@@ -742,14 +758,95 @@ function walkFrame(dt) {
     const hitP = ray.intersectObjects(walk.panels, false)[0];
     const hitAny = ray.intersectObjects(walk.all, false)[0];
     let place;
-    if (hitP) place = PLACE[hitP.object.userData.type.slice(0, 2)];
-    else if (hitAny) place = ['열린 칸', '패널 없이 하늘이 보이는 자리 — 옆길과 만나는 문 근처', '#9fc6e8'];
-    else if (n.d > 4 || n.u < walk.inA - 0.02 || n.u > walk.inB + 0.02)
-      place = walk.free ? ['잔디밭', '켄싱턴 가든스 — 멀리서는 닫힌 벽 하나', '#6f9a45']
-            : n.u < 0.5 ? ['다가가는 중', '멀리서는 닫힌 벽 하나', '#6f9a45'] : ['빠져나온 뒤', '뒤돌아보면 다시 닫힌 벽', '#6f9a45'];
-    else place = ['입구', '벽이 아래에서 벌어져 길이 되는 자리', '#c8c2b8'];
+    const inside = n.u > walk.inA && n.u < walk.inB && n.d < 2.6;
+    const nearEnd = Math.min(Math.abs(n.u - walk.inA), Math.abs(walk.inB - n.u)) * walk.len < 1.4;
+    if (hitP && hitP.object.userData.flap) {
+      const f = hitP.object.userData.flap;
+      place = f.open ? ['여닫이 패널 아래 · 열림', '누군가 열어 둔 패널 — 바람과 하늘이 들어옴', '#debe8c']
+                     : ['여닫이 패널 아래 · 닫힘', '그늘이 가장 필요한 자리 — 바라보고 E 키로 직접 열기', '#debe8c'];
+    } else if (hitP) place = PLACE[hitP.object.userData.type.slice(0, 2)];
+    else if (inside && nearEnd) place = ['입구', '벽이 아래에서 벌어져 길이 되는 자리', '#c8c2b8'];
+    else if (inside) place = ['열린 칸', '패널 없이 하늘이 보이는 자리', '#9fc6e8'];
+    else if (hitAny) place = ['벽 아래', '리브 사이로 빠져나가는 중', '#c8c2b8'];
+    else place = walk.free ? ['잔디밭', '켄싱턴 가든스 — 멀리서는 닫힌 벽 하나', '#6f9a45']
+               : n.u < 0.5 ? ['다가가는 중', '멀리서는 닫힌 벽 하나', '#6f9a45'] : ['빠져나온 뒤', '뒤돌아보면 다시 닫힌 벽', '#6f9a45'];
     $('whwhere').textContent = place[0];
     $('whwhere').style.setProperty('--c', place[2]);
     $('whnote').textContent = place[1];
   }
 }
+
+// ---------- 안에 있는 사람이 직접 여닫는 패널 (P1) ----------
+// 그늘 일사가 가장 큰 칸은 평소에 닫혀 그늘을 만들고, 안에 있는 사람이 손잡이를 밀어(높은 칸은 줄을 당겨)
+// 위 경첩을 축으로 바깥으로 연다. 가스 스프링이 원하는 각도(최대 55°)에서 붙잡아 준다.
+const flaps = [];
+let flapData = null, flapMode = 'closed', sunHour = 14, dayPlay = false, aimed = null;
+const demo = { t: 0 };
+const FLAP_MAX = THREE.MathUtils.degToRad(55);
+const AIM_COLOR = new THREE.Color('#6a4a1a'), NO_EMIT = new THREE.Color('#000000');
+function buildFlaps() {
+  if (!flapData) return;
+  (groups.after['P1_막힌패널'] || []).forEach((o) => {
+    const f = flapData[o.name]; if (!f) return;
+    const a = new THREE.Vector3(...f.a), b = new THREE.Vector3(...f.b);
+    const pivot = new THREE.Group();
+    pivot.position.copy(a).add(b).multiplyScalar(0.5);
+    o.parent.add(pivot); pivot.updateMatrixWorld(true); pivot.attach(o);
+    o.userData.base = o.position.clone();
+    const axis = b.clone().sub(a).normalize();
+    const n = new THREE.Vector3(...f.n).normalize();
+    const c = new THREE.Vector3(...f.c).sub(pivot.position);
+    const sign = c.clone().applyAxisAngle(axis, 0.2).sub(c).dot(n) > 0 ? 1 : -1;   // 아래 끝이 바깥으로 나가는 쪽
+    const flap = { pivot, axis, sign, n, mesh: o, angle: 0, open: false };
+    o.userData.flap = flap;
+    flaps.push(flap);
+  });
+}
+function updateFlaps(dt) {
+  if (!flaps.length) return;
+  let open = flaps.filter((f) => f.open).length;
+  if (flapMode === 'demo') {   // 1단계: 안에 있는 사람들이 여기저기 패널을 여닫는 모습
+    demo.t -= dt;
+    if (demo.t <= 0) {
+      demo.t = 0.7 + Math.random() * 0.8;
+      const want = open < 14 ? false : open > 20 ? true : Math.random() < 0.5;   // 열린 것을 닫을지
+      const pool = flaps.filter((f) => f.open === want);
+      if (pool.length) { const f = pool[Math.floor(Math.random() * pool.length)]; f.open = !f.open; }
+    }
+  }
+  open = 0;
+  for (const f of flaps) {
+    const target = flapMode !== 'closed' && f.open ? FLAP_MAX : 0;
+    f.angle += THREE.MathUtils.clamp(target - f.angle, -dt * 1.2, dt * 1.2);
+    f.pivot.quaternion.setFromAxisAngle(f.axis, f.sign * f.angle);
+    if (f.open && flapMode !== 'closed') open++;
+    f.mesh.material.emissive?.copy(f === aimed ? AIM_COLOR : NO_EMIT);
+  }
+  if (flapMode === 'demo') {
+    document.getElementById('dayinfo').textContent = `안에 있는 사람들이 여닫는 중 · ${flaps.length}장 중 ${open}장 열림 · 패널을 클릭해 직접 열어 보세요`;
+  }
+}
+// 걷기: 화면 가운데로 바라본 패널 (3.5m 안, 앞을 가리는 부재가 없을 때)
+const _fw = new THREE.Vector3();
+function aimFlap() {
+  camera.getWorldDirection(_fw);
+  ray.set(camera.position, _fw); ray.far = 3.5;
+  const hit = ray.intersectObjects(walk.all, false)[0];
+  ray.far = Infinity;
+  aimed = hit && hit.object.userData.flap ? hit.object.userData.flap : null;
+  $('waim').textContent = aimed ? (aimed.open ? 'E · 클릭 — 패널 닫기' : 'E · 클릭 — 패널 열기') : '';
+}
+// 클릭(끌지 않고 누름)으로 열고 닫기: 걷기에서는 바라본 패널, 1단계에서는 마우스 아래 패널
+const _ndc = new THREE.Vector2();
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) { downAt = null; return; }
+  downAt = null;
+  if (walk.on) { aimFlap(); if (aimed) aimed.open = !aimed.open; return; }
+  if (flapMode !== 'demo' || !flaps.length) return;
+  _ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(_ndc, camera); ray.far = Infinity;
+  const hit = ray.intersectObjects(flaps.map((f) => f.mesh), false)[0];
+  if (hit) { const f = hit.object.userData.flap; f.open = !f.open; demo.t = 3; }   // 누른 뒤 잠시 시연을 쉰다
+});
