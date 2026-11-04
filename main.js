@@ -843,7 +843,7 @@ function updateFlaps(dt) {
     L.position.copy(f.c0).addScaledVector(_sd2, 0.6);
     L.target.position.copy(f.c0).addScaledVector(_sd2, -6);
     L.target.updateMatrixWorld();
-    L.intensity = 18 * (f.angle / FLAP_MAX);
+    L.intensity = 6 * (f.angle / FLAP_MAX);
   });
   if (flapMode === 'demo') {
     document.getElementById('dayinfo').textContent = `안에 있는 사람들이 여닫는 중 · ${flaps.length}장 중 ${open}장 열림 · 패널을 클릭해 직접 열어 보세요`;
