@@ -69,7 +69,7 @@ grid.position.y = 0.002;
 scene.add(grid);
 
 const walk = { on: false, path: null, len: 0, s: 0, auto: true, free: false, speed: 1.1, yaw: 0, pitch: -0.04,
-  pos: null, head: 0, drag: null, keys: {}, bob: 0, hudT: 0, panels: [], all: [], samples: [] };
+  pos: null, head: 0, eye: 1.6, jy: 0, vy: 0, drag: null, keys: {}, bob: 0, hudT: 0, panels: [], all: [], samples: [] };
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -487,7 +487,7 @@ const PLACE = {
 // 보통 화면과 걷기 화면의 빛 설정
 const LOOK = {
   normal: { hemi: 1.4, sun: 2.4, exp: 1.05, bg: '#efece6', fogNear: 45, fogFar: 90 },
-  walk:   { hemi: 0.22, sun: 3.6, exp: 1.0, bg: '#bcd3e6', fogNear: 35, fogFar: 120 },
+  walk:   { hemi: 0.44, sun: 3.6, exp: 1.0, bg: '#bcd3e6', fogNear: 35, fogFar: 120 },
 };
 const SUN_HOME = sun.position.clone();
 
@@ -607,7 +607,7 @@ function enterWalk() {
   chainGroup.visible = false; play.on = false;
   showOnly('after'); overlay.visible = false; dataLines.visible = false;
   controls.enabled = false; controls.autoRotate = false; camAnim = null;
-  walk.s = 0; walk.auto = true; walk.free = false; walk.yaw = 0; walk.pitch = -0.04;
+  walk.s = 0; walk.auto = true; walk.free = false; walk.eye = EYE; walk.jy = 0; walk.vy = 0; walk.yaw = 0; walk.pitch = -0.04;
   camera.fov = 64; camera.near = 0.05;
   applyLook('walk');
   setSun(+$('wsun').value);
@@ -644,7 +644,7 @@ $('wprog').onchange = (e) => e.target.blur();
 $('wsun').oninput = (e) => setSun(+e.target.value);
 $('wsun').onchange = (e) => e.target.blur();
 
-const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'sl', KeyD: 'sr', ArrowLeft: 'l', ArrowRight: 'r', ShiftLeft: 'run', ShiftRight: 'run' };
+const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'sl', KeyD: 'sr', ArrowLeft: 'l', ArrowRight: 'r', ShiftLeft: 'run', ShiftRight: 'run', KeyC: 'crouch' };
 addEventListener('keydown', (e) => {
   if (!walk.on) return;
   const k = KEYMAP[e.code];
@@ -656,6 +656,7 @@ addEventListener('keydown', (e) => {
       syncWalkUI();
     }
   }
+  if (e.code === 'KeyJ' && !e.repeat && walk.jy === 0) walk.vy = 3.3;   // 점프: 약 0.55m
   if (e.code === 'Space') { $('wplay').click(); e.preventDefault(); }
   if (e.code === 'Escape') exitWalk();
 });
@@ -699,7 +700,7 @@ function walkFrame(dt) {
     if (fw || st) {
       // 앞 = (sin h, cos h), 오른쪽 = (-cos h, sin h)
       _mv.set(Math.sin(h) * fw - Math.cos(h) * st, 0, Math.cos(h) * fw + Math.sin(h) * st).normalize();
-      const d = (k.run ? 3.0 : 1.4) * dt;
+      const d = (k.crouch ? 0.7 : k.run ? 3.0 : 1.4) * dt;
       // 막히면 축 방향으로 미끄러지듯
       if (!blocked(walk.pos, _mv, d)) { walk.pos.addScaledVector(_mv, d); moving = true; }
       else for (const ax of [[_mv.x, 0], [0, _mv.z]]) {
@@ -720,8 +721,14 @@ function walkFrame(dt) {
     h = Math.atan2(t.x, t.z) + walk.yaw;
   }
   walk.curHead = h;
-  if (moving) walk.bob += dt * (k.run && walk.free ? 11 : 7.5);
-  camera.position.y = EYE + Math.sin(walk.bob) * 0.022;
+  // 웅크리기(C): 눈높이 1.6m → 1.0m, 점프(J): 중력 9.8 m/s²
+  walk.eye += ((k.crouch ? 1.0 : EYE) - walk.eye) * Math.min(1, dt * 10);
+  if (walk.jy > 0 || walk.vy > 0) {
+    walk.vy -= 9.8 * dt; walk.jy += walk.vy * dt;
+    if (walk.jy <= 0) { walk.jy = 0; walk.vy = 0; }
+  }
+  if (moving && walk.jy === 0) walk.bob += dt * (k.run && walk.free ? 11 : 7.5);
+  camera.position.y = walk.eye + walk.jy + Math.sin(walk.bob) * 0.022;
   _dir.set(Math.sin(h) * Math.cos(walk.pitch), Math.sin(walk.pitch), Math.cos(h) * Math.cos(walk.pitch));
   camera.lookAt(camera.position.clone().add(_dir));
 
