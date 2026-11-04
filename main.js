@@ -806,7 +806,7 @@ function buildFlaps() {
   });
   // 열린 칸으로 들어오는 하늘빛: 가까운 열린 패널 6장에 빛을 붙인다 (빛 개수는 고정해야 셰이더가 다시 안 만들어진다)
   for (let i = 0; i < 6; i++) {
-    const L = new THREE.SpotLight('#fff1d6', 0, 14, 0.42, 0.65, 1.0);   // 열린 칸으로 비쳐 드는 햇빛 기둥
+    const L = new THREE.SpotLight('#fff1d6', 0, 14, 0.45, 0.95, 1.0);   // 열린 칸으로 비쳐 드는 햇빛 기둥
     scene.add(L, L.target); skyLights.push(L);
   }
 }
@@ -843,7 +843,7 @@ function updateFlaps(dt) {
     L.position.copy(f.c0).addScaledVector(_sd2, 0.6);
     L.target.position.copy(f.c0).addScaledVector(_sd2, -6);
     L.target.updateMatrixWorld();
-    L.intensity = 60 * (f.angle / FLAP_MAX);
+    L.intensity = 18 * (f.angle / FLAP_MAX);
   });
   if (flapMode === 'demo') {
     document.getElementById('dayinfo').textContent = `안에 있는 사람들이 여닫는 중 · ${flaps.length}장 중 ${open}장 열림 · 패널을 클릭해 직접 열어 보세요`;
