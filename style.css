@@ -81,6 +81,7 @@ code { background: #ece7df; padding: 1px 5px; border-radius: 4px; font-size: 11.
 
 .slider { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--mut); margin: 10px 0; }
 .slider input { flex: 1; accent-color: var(--ink); }
+#flapview { width: 100%; height: 220px; border-radius: 12px; background: linear-gradient(#fbfaf7, #efebe4); display: block; }
 #jointview { width: 100%; height: 190px; border-radius: 12px; background: linear-gradient(#fbfaf7, #efebe4); display: block; }
 
 #nav { position: fixed; left: 16px; right: 16px; bottom: 16px; height: 56px; background: rgba(255,255,255,0.94);

@@ -477,7 +477,9 @@ renderer.setAnimationLoop(() => {
       jCam.lookAt(0, -0.12, 0);
       jRenderer.render(jScene, jCam);
     }
+    renderFlapView(dt);
   }
+  if (walk.on) updatePeople(dt);
 });
 
 // ---------- 걷기: 사람 눈높이로, 켄싱턴 가든스 잔디밭 위에서 ----------
@@ -493,7 +495,7 @@ const PLACE = {
 // 보통 화면과 걷기 화면의 빛 설정
 const LOOK = {
   normal: { hemi: 1.4, sun: 2.4, exp: 1.05, bg: '#efece6', fogNear: 45, fogFar: 90 },
-  walk:   { hemi: 0.44, sun: 3.6, exp: 1.0, bg: '#bcd3e6', fogNear: 35, fogFar: 120 },
+  walk:   { hemi: 0.22, sun: 3.6, exp: 1.0, bg: '#bcd3e6', fogNear: 35, fogFar: 120 },
 };
 const SUN_HOME = sun.position.clone();
 
@@ -583,6 +585,7 @@ function buildWalkPath() {
     walk.all.push(o); if (t.startsWith('P')) walk.panels.push(o);
   }));
   buildSite();
+  buildPeople();
 }
 function nearestU(p) {
   let best = 0, d = 1e9;
@@ -850,3 +853,145 @@ canvas.addEventListener('pointerup', (e) => {
   const hit = ray.intersectObjects(flaps.map((f) => f.mesh), false)[0];
   if (hit) { const f = hit.object.userData.flap; f.open = !f.open; demo.t = 3; }   // 누른 뒤 잠시 시연을 쉰다
 });
+
+// ---------- 5단계: 여닫이 패널 상세 (분해 · 열고 닫기) ----------
+// 바깥 = +z, 안 = -z. 패널은 위 경첩(y=0)을 축으로 아래 끝이 바깥으로 들린다.
+const fCanvas = document.getElementById('flapview');
+const fRenderer = new THREE.WebGLRenderer({ canvas: fCanvas, antialias: true, alpha: true });
+fRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+fRenderer.outputColorSpace = THREE.SRGBColorSpace;
+const fScene = new THREE.Scene();
+fScene.add(new THREE.HemisphereLight('#ffffff', '#a59c8f', 1.5));
+const fl1 = new THREE.DirectionalLight('#ffffff', 2.2); fl1.position.set(-2, 3, -3); fScene.add(fl1);
+const fl2 = new THREE.DirectionalLight('#ffffff', 1.2); fl2.position.set(2, 1, 3); fScene.add(fl2);
+const fCam = new THREE.PerspectiveCamera(30, 2, 0.05, 30);
+const FM = (c, metal = 0) => new THREE.MeshStandardMaterial({ color: c, roughness: metal ? 0.45 : 0.8, metalness: metal });
+const fParts = [];   // { obj, base, dir }
+function fPart(obj, dir) { obj.userData.base = obj.position.clone(); fParts.push({ obj, dir: new THREE.Vector3(...dir) }); fScene.add(obj); return obj; }
+const W = 1.1, Hh = 0.95;
+// 리브 두 개 (양옆), 도리 (위)
+const ribM = FM('#b07a46');
+[-1, 1].forEach((sx) => { const r = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.2), ribM); r.position.set(sx * (W / 2 + 0.06), -0.55, -0.12); fPart(r, [sx * 0.35, 0, 0]); });
+const pur = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 0.09, 0.09), FM('#c49662')); pur.position.set(0, 0.05, -0.05); fPart(pur, [0, 0.35, 0]);
+// 경첩 두 개
+const hingeM = FM('#5a5c60', 0.4);
+[-0.35, 0.35].forEach((x) => {
+  const g = new THREE.Group();
+  const leaf1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.006), hingeM); leaf1.position.set(0, 0.03, 0.006);
+  const leaf2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.006), hingeM); leaf2.position.set(0, -0.03, 0.006);
+  const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.13, 8), hingeM); pin.rotation.z = Math.PI / 2; pin.position.z = 0.012;
+  g.add(leaf1, leaf2, pin); g.position.set(x, 0, 0.0); fPart(g, [0, 0.15, 0.25]);
+});
+// 패널 (경첩 축에 매단 피벗) + 안쪽 손잡이
+const fPivot = new THREE.Group(); fPart(fPivot, [0, 0, 0.45]);
+const panel = new THREE.Mesh(new THREE.BoxGeometry(W, Hh, 0.018), FM('#debe8c')); panel.position.set(0, -Hh / 2, 0.009); fPivot.add(panel);
+const handle = new THREE.Group();
+const hb = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 10), FM('#3a3c40', 0.5)); hb.rotation.z = Math.PI / 2; hb.position.z = -0.05;
+[-0.1, 0.1].forEach((x) => { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.015, 0.05), FM('#3a3c40', 0.5)); leg.position.set(x, 0, -0.025); handle.add(leg); });
+handle.add(hb); handle.position.set(0, -Hh + 0.12, 0); fPivot.add(handle);
+const ring = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.005, 6, 12), FM('#3a3c40', 0.5)); ring.position.set(-0.4, -Hh + 0.06, -0.01); fPivot.add(ring);
+// 가스 스프링: 리브(안쪽) A → 패널 B
+const gasBody = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1, 10), FM('#222428', 0.6)); fScene.add(gasBody);
+const gasRod = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 1, 8), FM('#c9ccd0', 0.8)); fScene.add(gasRod);
+const gasA0 = new THREE.Vector3(W / 2 - 0.02, -0.15, -0.2), gasB0 = new THREE.Vector3(W / 2 - 0.06, -0.55, -0.01);   // B는 패널(피벗) 좌표
+const gasDir = new THREE.Vector3(0, 0, -0.35);
+// 줄과 클리트 (높은 칸): 패널 고리 → 리브 아래 클리트
+const ropeGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: '#7a5a2a' })); fScene.add(rope);
+const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.03), FM('#3a3c40', 0.5)); cleat.position.set(-(W / 2 + 0.06), -1.2, -0.24); fPart(cleat, [-0.35, 0, -0.2]);
+const flapEx = document.getElementById('flapex');
+const fState = { t: 0 };
+const _A = new THREE.Vector3(), _B = new THREE.Vector3(), _M = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
+function placeBar(mesh, a, b) {
+  _M.subVectors(b, a); const L = _M.length();
+  mesh.position.copy(a).addScaledVector(_M, 0.5); mesh.scale.set(1, Math.max(L, 0.001), 1);
+  mesh.quaternion.setFromUnitVectors(_Y, _M.normalize());
+}
+function renderFlapView(dt) {
+  const r = fCanvas.getBoundingClientRect(); if (r.width <= 0) return;
+  fRenderer.setSize(r.width, r.height, false); fCam.aspect = r.width / r.height; fCam.updateProjectionMatrix();
+  fState.t += dt;
+  const k = +flapEx.value;
+  fParts.forEach((p) => p.obj.position.copy(p.obj.userData.base).addScaledVector(p.dir, k));
+  const ang = THREE.MathUtils.degToRad(55) * (0.5 - 0.5 * Math.cos(fState.t * 0.9));   // 천천히 열고 닫기
+  fPivot.rotation.x = -ang;
+  fPivot.updateMatrixWorld(true);
+  _A.copy(gasA0).addScaledVector(gasDir, k);
+  _B.copy(gasB0).applyMatrix4(fPivot.matrixWorld);
+  const mid = _A.clone().lerp(_B, 0.55);
+  placeBar(gasBody, _A, mid); placeBar(gasRod, mid.clone().lerp(_A, 0.1), _B);
+  const ringW = ring.getWorldPosition(new THREE.Vector3());
+  const cl = cleat.position.clone().add(new THREE.Vector3(0, 0.04, 0));
+  const pos = ropeGeo.attributes.position; pos.setXYZ(0, ringW.x, ringW.y, ringW.z); pos.setXYZ(1, cl.x, cl.y, cl.z); pos.needsUpdate = true;
+  const a = fState.t * 0.25;
+  fCam.position.set(-2.0 + Math.sin(a) * 0.6, 0.35, -3.4);   // 안쪽에서 비스듬히
+  fCam.lookAt(0, -0.5, 0.15);
+  fRenderer.render(fScene, fCam);
+}
+
+// ---------- 걷기: 주변 사람들 ----------
+const people = [];
+function personMesh(seed) {
+  let s = seed * 9301 + 49297; const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  const shirts = ['#3d5a80', '#c8553d', '#2a9d8f', '#e9c46a', '#6d597a', '#f4f1de', '#264653', '#b5838d'];
+  const pants = ['#2b2d42', '#4a4e69', '#6b705c', '#22223b', '#8d99ae'];
+  const skin = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'][Math.floor(rnd() * 5)];
+  const h = 1.58 + rnd() * 0.26, sc = h / 1.75;
+  const g = new THREE.Group();
+  const shirt = FM(shirts[Math.floor(rnd() * shirts.length)]), pant = FM(pants[Math.floor(rnd() * pants.length)]), sk = FM(skin);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.42, 4, 8), shirt); torso.position.y = 1.2; torso.scale.set(1, 1, 0.7);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), sk); head.position.y = 1.62;
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), FM(['#2b1d14', '#5a3825', '#1a1a1a', '#a67b5b'][Math.floor(rnd() * 4)])); hair.position.y = 1.635;
+  const limb = (r, l, m, y, x) => { const piv = new THREE.Group(); piv.position.set(x, y, 0); const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, l, 3, 6), m); mesh.position.y = -l / 2 - r; piv.add(mesh); g.add(piv); return piv; };
+  const legL = limb(0.065, 0.72, pant, 0.88, -0.09), legR = limb(0.065, 0.72, pant, 0.88, 0.09);
+  const armL = limb(0.045, 0.5, shirt, 1.42, -0.22), armR = limb(0.045, 0.5, shirt, 1.42, 0.22);
+  g.add(torso, head, hair);
+  g.scale.setScalar(sc);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return { g, legL, legR, armL, armR, phase: rnd() * 6.28 };
+}
+function buildPeople() {
+  const paths = [walk.path];
+  process.cross.forEach((c) => paths.push(new THREE.CatmullRomCurve3(c.map(R2T).map((v) => v.setY(0)))));
+  let seed = 3;
+  // 동선을 따라 걷는 사람 (주 동선 7명, 옆길마다 3명)
+  paths.forEach((path, pi) => {
+    const n = pi === 0 ? 7 : 3, L = path.getLength();
+    for (let i = 0; i < n; i++) {
+      const p = personMesh(seed++);
+      p.path = path; p.L = L; p.u = (i + 0.3) / n; p.dirn = i % 2 ? 1 : -1;
+      p.speed = (0.9 + (i % 3) * 0.18) / L; p.side = (i % 2 ? 0.55 : -0.55) * (pi === 0 ? 1 : 0.6);
+      p.walking = true; site.add(p.g); people.push(p);
+    }
+  });
+  // 잔디에 서 있는 사람들 (두세 명씩 모여서)
+  [[-14, 6], [12, -7], [-6, -9], [16, 8]].forEach(([x, z], gi) => {
+    for (let j = 0; j < 2 + (gi % 2); j++) {
+      const p = personMesh(seed++);
+      const ang = j / 3 * Math.PI * 2;
+      p.g.position.set(x + Math.cos(ang) * 0.7, 0, z + Math.sin(ang) * 0.7);
+      p.g.rotation.y = Math.atan2(x - p.g.position.x, z - p.g.position.z);   // 서로 마주 본다
+      p.walking = false; site.add(p.g); people.push(p);
+    }
+  });
+}
+const _pp = new THREE.Vector3(), _pt = new THREE.Vector3();
+function updatePeople(dt) {
+  for (const p of people) {
+    p.phase += dt * (p.walking ? 6 : 1.2);
+    if (p.walking) {
+      p.u += p.speed * dt * p.dirn;
+      if (p.u > 1) { p.u = 1; p.dirn = -1; } if (p.u < 0) { p.u = 0; p.dirn = 1; }
+      p.path.getPointAt(p.u, _pp); p.path.getTangentAt(p.u, _pt);
+      if (p.dirn < 0) _pt.negate();
+      const nx = -_pt.z, nz = _pt.x;   // 진행 방향 오른쪽으로 비켜 걷기
+      p.g.position.set(_pp.x + nx * p.side * p.dirn, Math.abs(Math.sin(p.phase)) * 0.03, _pp.z + nz * p.side * p.dirn);
+      p.g.rotation.y = Math.atan2(_pt.x, _pt.z);
+      const sw = Math.sin(p.phase) * 0.5;
+      p.legL.rotation.x = sw; p.legR.rotation.x = -sw; p.armL.rotation.x = -sw * 0.8; p.armR.rotation.x = sw * 0.8;
+    } else {
+      p.armL.rotation.x = Math.sin(p.phase) * 0.15; p.armR.rotation.x = 0.1;
+      p.g.position.y = Math.sin(p.phase * 0.5) * 0.005;
+    }
+  }
+}
